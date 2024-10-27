@@ -3,6 +3,8 @@
 #include <Adafruit_SHT4x.h>
 #include <EEPROM.h>
 #include "CRC.h"
+#include <RGBLed.h>
+#include "TM1651.h"
 
 // Switches
 #define PIN_SW_LIGHT 39
@@ -23,11 +25,20 @@ TM1637Display dispGoalHum(PIN_DISPLAY_CLK, PIN_DISP_GOAL_HUM_DIO);
 TM1637Display dispCurrentTemp(PIN_DISPLAY_CLK, PIN_DISP_CURRENT_TEMP_DIO);
 TM1637Display dispCurrentHum(PIN_DISPLAY_CLK, PIN_DISP_CURRENT_HUM_DIO);
 
-#include "TM1651.h"
-#define LEVEL_CLK_PIN 36 //pins definitions for TM1651 and can be changed to other ports       
-#define LEVEL_DIO_PIN 38
-TM1651 gaugeDisplay(LEVEL_CLK_PIN,LEVEL_DIO_PIN);
+#define PIN_GAUGE_CLK 36
+#define PIN_GAUGE_DIO 38
+TM1651 gaugeDisplay(PIN_GAUGE_CLK, PIN_GAUGE_DIO);
 uint8_t batteryLevel = 0;
+
+#define PIN_LED_HumRed 44
+#define PIN_LED_HumGreen 42
+#define PIN_LED_HumBlue 46 
+#define PIN_LED_HeatRed 50
+#define PIN_LED_HeatGreen 48
+#define PIN_LED_HeatBlue 52 
+
+RGBLed ledHumidifier(PIN_LED_HumRed, PIN_LED_HumGreen, PIN_LED_HumBlue, RGBLed::COMMON_CATHODE);
+RGBLed ledHeater(PIN_LED_HeatRed, PIN_LED_HeatGreen, PIN_LED_HeatBlue, RGBLed::COMMON_CATHODE);
 
 Adafruit_SHT4x sht4Up = Adafruit_SHT4x();
 Adafruit_SHT4x sht4Down = Adafruit_SHT4x();
@@ -54,13 +65,6 @@ bool lightPrevOn = false;
 bool humidifierPrevOn = false;
 #define PIN_FAN 13
 int fanPowerLevel = 0;
-
-const int HumLed_RedPin = 50;
-const int HumLed_GreenPin = 48;
-const int HumLed_BluePin = 52; 
-const int HeatLed_RedPin = 44;
-const int HeatLed_GreenPin = 42;
-const int HeatLed_BluePin = 46; 
 
 #include "Configuration.h"
 Configuration configuration;
@@ -157,6 +161,9 @@ void isrE3 ()  {
 void setup() {
   Serial.begin(9600);
 
+  ledHumidifier.off();
+  ledHeater.off();
+
   pinMode(PIN_SW_LIGHT, INPUT_PULLUP);
   pinMode(PIN_SW_SENSOR_SELECTOR, INPUT_PULLUP);
   pinMode(PIN_SW_FORCE_HEATER, INPUT_PULLUP);
@@ -223,20 +230,6 @@ void setup() {
   // Attach the routine to service the interrupts
   attachInterrupt(digitalPinToInterrupt(PinE3A), isrE3, LOW);
 
-  pinMode(HumLed_RedPin, OUTPUT);
-  pinMode(HumLed_GreenPin, OUTPUT);
-  pinMode(HumLed_BluePin, OUTPUT);
-  pinMode(HeatLed_RedPin, OUTPUT);
-  pinMode(HeatLed_GreenPin, OUTPUT);
-  pinMode(HeatLed_BluePin, OUTPUT);
-
-  analogWrite(HumLed_RedPin, 0);
-  analogWrite(HumLed_GreenPin, 0);
-  analogWrite(HumLed_BluePin, 255);
-  analogWrite(HeatLed_RedPin, 255);
-  analogWrite(HeatLed_GreenPin, 0);
-  analogWrite(HeatLed_BluePin, 0);
-
   ReadConfiguration(configuration);
 }
 
@@ -280,6 +273,9 @@ void loop() {
 
   gaugeDisplay.displayLevel(batteryLevel);
   batteryLevel = ( batteryLevel < 7 ? batteryLevel+1 : 0 );
+
+  ledHeater.setColor(RGBLed::RED);
+  ledHumidifier.flash(RGBLed::BLUE, 100);
 
 
   // if( virtualPositionE1 >= 60 ) {
