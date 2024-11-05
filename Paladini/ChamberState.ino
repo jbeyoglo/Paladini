@@ -9,12 +9,14 @@ ChamberState& ChamberState::operator=(const ChamberState& other) {
   }
 
   this->temperature = other.temperature;
+  this->heaterState = other.heaterState;
+  this->timeLastChangeHeater = other.timeLastChangeHeater;
   this->humidity = other.humidity;
+  this->humidifierState = other.humidifierState;
+  this->timeLastChangeHumidifier = other.timeLastChangeHumidifier;
   this->switchLight = other.switchLight;
   this->timeLastChangeSwitchLight = other.timeLastChangeSwitchLight;
-  this->switchForceHeater = other.switchForceHeater;
-  this->switchForceHumidity = other.switchForceHumidity;
-  this->fanSpeed = other.fanSpeed;
+  this->fanPowerLevel = other.fanPowerLevel;
   this->mode = other.mode;
 
   return *this;

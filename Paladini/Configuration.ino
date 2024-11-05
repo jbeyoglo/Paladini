@@ -10,9 +10,9 @@ void ReadConfiguration( Configuration &configuration) {
   if( configuration.crc != crc2Verify ) {
     configuration.goalTemperature = 1800;
     configuration.goalHumidity = 60;
-    configuration.fanSpeedIdling = 20;
-    configuration.fanSpeedHumidifying = 60;
-    configuration.fanSpeedHeating = 40;
+    configuration.goalFanSpeed[Idle] = 20;
+    configuration.goalFanSpeed[Humidifying] = 60;
+    configuration.goalFanSpeed[Heating] = 40;
   }
 }
 

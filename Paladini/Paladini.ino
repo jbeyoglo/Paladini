@@ -36,34 +36,28 @@ uint8_t batteryLevel = 0;
 #define PIN_LED_HeatRed 50
 #define PIN_LED_HeatGreen 48
 #define PIN_LED_HeatBlue 52 
-
 RGBLed ledHumidifier(PIN_LED_HumRed, PIN_LED_HumGreen, PIN_LED_HumBlue, RGBLed::COMMON_CATHODE);
 RGBLed ledHeater(PIN_LED_HeatRed, PIN_LED_HeatGreen, PIN_LED_HeatBlue, RGBLed::COMMON_CATHODE);
 
 Adafruit_SHT4x sht4Up = Adafruit_SHT4x();
 Adafruit_SHT4x sht4Down = Adafruit_SHT4x();
 
-// Used for generating interrupts using CLK signal
+// Rotary encoders: Used for generating interrupts using CLK signal
 const int PinE1A = 19;
 const int PinE1B = 33;
 const int PinE2A = 18;
 const int PinE2B = 31;
 const int PinE3A = 2;
 const int PinE3B = 35;
-// Keep track of last rotary value
-int lastCountE1 = 50;
-int lastCountE2 = 50;
-int lastCountE3 = 50;
 // Updated by the ISR (Interrupt Service Routine)
-volatile int virtualPositionE1 = 50;
-volatile int virtualPositionE2 = 50;
-volatile int virtualPositionE3 = 50;
+// volatile int virtualPositionE3 = 50;
 
 #define PIN_LIGHT 11
-bool lightPrevOn = false;
 #define PIN_HUMIDIFIER 10
-bool humidifierPrevOn = false;
+const unsigned long MIN_TIME_HUMIDIFIER_OFF = ( 40 * 1000 ); // 20 seconds
+const unsigned long MIN_TIME_HUMIDIFIER_ON = ( 20 * 1000 ); // 20 seconds
 #define PIN_FAN 13
+const unsigned long MIN_TIME_HEATER_OFF = ( 2 * 60 * 1000 ); // 2 minutes
 int fanPowerLevel = 0;
 
 #include "Configuration.h"
@@ -91,8 +85,7 @@ void isrE1 ()  {
 
   // If interrupts come faster than 5ms, assume it's a bounce and ignore
   if (interruptTime - lastInterruptTime > 5) {
-    if (digitalRead(PinE1B) == LOW)
-    {
+    if (digitalRead(PinE1B) == LOW) {
       configuration.goalTemperature-=10 ; // Could be -5 or -10
     }
     else {
@@ -115,8 +108,7 @@ void isrE2 ()  {
 
   // If interrupts come faster than 5ms, assume it's a bounce and ignore
   if (interruptTime - lastInterruptTime > 5) {
-    if (digitalRead(PinE2B) == LOW)
-    {
+    if (digitalRead(PinE2B) == LOW) {
       configuration.goalHumidity-- ; // Could be -5 or -10
     }
     else {
@@ -140,16 +132,18 @@ void isrE3 ()  {
 
   // If interrupts come faster than 5ms, assume it's a bounce and ignore
   if (interruptTime - lastInterruptTime > 5) {
-    if (digitalRead(PinE3B) == LOW)
-    {
-      virtualPositionE3-- ; // Could be -5 or -10
+    if (digitalRead(PinE3B) == LOW) {
+      configuration.goalFanSpeed[current.mode]--;
+      // virtualPositionE3-- ;
     }
     else {
-      virtualPositionE3++ ; // Could be +5 or +10
+      configuration.goalFanSpeed[current.mode]++;
+      // virtualPositionE3++ ;
     }
 
-    // Restrict value from 0 to +100
-    virtualPositionE3 = min(100, max(0, virtualPositionE3));
+    // Restrict value from 0 to +31
+    // virtualPositionE3 = min(31, max(0, virtualPositionE3));
+    configuration.goalFanSpeed[current.mode] = min(31, max(0, configuration.goalFanSpeed[current.mode]));
   }
   // Keep track of when we were here last (no more than every 5ms)
   lastInterruptTime = interruptTime;
@@ -171,10 +165,14 @@ void setup() {
 
   digitalWrite(PIN_LIGHT, HIGH);
   pinMode(PIN_LIGHT, OUTPUT);
-  
+
   digitalWrite(PIN_HUMIDIFIER, HIGH);
   pinMode(PIN_HUMIDIFIER, OUTPUT);
-  
+  current.humidifierState = false;
+  current.timeLastChangeHumidifier = millis();
+  current.timeLastChangeHeater = millis();
+  current.mode = Idle;
+
   pinMode(PIN_FAN, OUTPUT);
 
   // Set the display brightness for all displays (0-7)
@@ -241,6 +239,7 @@ void loop() {
 
   UpdateConfiguration(configuration);
 
+  // read the proper temp/hum sensor
   sensors_event_t humidity, temp;
   if( digitalRead(PIN_SW_SENSOR_SELECTOR) == LOW ) {
     TCA9548A(0);
@@ -252,60 +251,63 @@ void loop() {
   nextLoop.temperature = (int)( temp.temperature * 100 );
   nextLoop.humidity = (int)( humidity.relative_humidity );
 
-  nextLoop.switchLight = digitalRead(PIN_SW_LIGHT);
-
-  // Display different numbers on each display
+  // Display temperature and humidty goal and current values
   dispGoalTemp.showNumberDecEx(configuration.goalTemperature, 0b01000000, false, 4, 0);
   dispGoalHum.showNumberDec(configuration.goalHumidity);
   dispCurrentTemp.showNumberDecEx(nextLoop.temperature, 0b01000000, false, 4, 0);
   dispCurrentHum.showNumberDec(nextLoop.humidity);
 
-  int number3 = virtualPositionE3;
-  
-
-  int sensorVal = digitalRead(PIN_SW_FORCE_HEATER);
-  if (sensorVal == LOW) {
-      number3 = 8888;
+  // humidifier + status led (red)
+  int forceHumidifier = digitalRead(PIN_SW_FORCE_HUMIDIFIER);
+  nextLoop.humidifierState = ( forceHumidifier == LOW 
+                                || ( configuration.goalHumidity > nextLoop.humidity 
+                                    && (current.timeLastChangeHumidifier+MIN_TIME_HUMIDIFIER_OFF) < millis() ) );
+  if( nextLoop.humidifierState != current.humidifierState ) {
+    if( nextLoop.humidifierState ) {
+      digitalWrite(PIN_HUMIDIFIER, LOW);
+      ledHumidifier.setColor(RGBLed::BLUE);
+    } else {
+      digitalWrite(PIN_HUMIDIFIER, HIGH);
+      ledHumidifier.off();
+      nextLoop.timeLastChangeHumidifier = millis();
+    }
   }
 
-  sensorVal = digitalRead(PIN_SW_FORCE_HUMIDIFIER);
-  
-
-  gaugeDisplay.displayLevel(batteryLevel);
-  batteryLevel = ( batteryLevel < 7 ? batteryLevel+1 : 0 );
-
-  ledHeater.setColor(RGBLed::RED);
-  ledHumidifier.flash(RGBLed::BLUE, 100);
-
-
-  // if( virtualPositionE1 >= 60 ) {
-  //   if( !lightPrevOn ) {
-  //     digitalWrite(PIN_LIGHT, LOW);
-  //     lightPrevOn = true;
-  //   }
-  // } else {
-  //   digitalWrite(PIN_LIGHT, HIGH);
-  //   lightPrevOn = false;
-  // }
-  
-  // if( virtualPositionE2 >= 60 ) {
-  //   if( !humidifierPrevOn ) {
-  //     digitalWrite(PIN_HUMIDIFIER, LOW);
-  //     humidifierPrevOn = true;
-  //   }
-  // } else {
-  //   digitalWrite(PIN_HUMIDIFIER, HIGH);
-  //   humidifierPrevOn = false;
-  // }
-
-  int newPowerLevel = map( virtualPositionE3, 0, 100, 0, 255);
-  if( newPowerLevel != fanPowerLevel ) {
-    fanPowerLevel = newPowerLevel;
-    analogWrite(PIN_FAN, fanPowerLevel);
+  // heater + status led (blue)
+  int forceHeater = digitalRead(PIN_SW_FORCE_HEATER);
+  nextLoop.heaterState = ( forceHeater == LOW || 
+                  ( configuration.goalTemperature > nextLoop.temperature 
+                        && (current.timeLastChangeHeater+MIN_TIME_HEATER_OFF) < millis() ) );
+  if( nextLoop.heaterState != current.heaterState ) {
+    if( nextLoop.heaterState ) {
+      //digitalWrite(PIN_HEATER, LOW);
+      ledHeater.setColor(RGBLed::RED);
+    } else {
+      //digitalWrite(PIN_HEATER, HIGH);
+      ledHeater.off();
+      nextLoop.timeLastChangeHeater = millis();
+    }
   }
-  //dispGoalHum.showNumberDec(fanPowerLevel);
 
+  // set the right mode
+  if( nextLoop.heaterState ) {
+    nextLoop.mode = Mode::Heating;
+  } else if( nextLoop.humidifierState ) { 
+      nextLoop.mode = Mode::Humidifying;
+  } else {
+      nextLoop.mode = Mode::Idle;
+  }
 
+  // fan speed - WIP, introduce modes...
+  nextLoop.fanPowerLevel = map( configuration.goalFanSpeed[nextLoop.mode], 0, 31, 0, 255);
+  if( nextLoop.fanPowerLevel != current.fanPowerLevel ) {
+    analogWrite(PIN_FAN, nextLoop.fanPowerLevel);
+    int newGaugeLevel = map( configuration.goalFanSpeed[nextLoop.mode], 0, 31, 0, 8);
+    gaugeDisplay.displayLevel(newGaugeLevel);
+  }
+
+  // Light
+  nextLoop.switchLight = digitalRead(PIN_SW_LIGHT);
   if( current.switchLight != nextLoop.switchLight ) {
     // pressing the switch
     if( nextLoop.switchLight == LOW ) {
